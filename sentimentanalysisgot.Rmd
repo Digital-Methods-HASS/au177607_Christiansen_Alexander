@@ -1,0 +1,225 @@
+---
+title: "SentimentAnalysisGoT"
+author: "Alexander V. Christiansen"
+date: "2025-03-19"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(here)
+library(pdftools)
+library(tidytext)
+library(textdata) 
+library(ggwordcloud)
+```
+
+
+I define my text as objects: 
+```{r}
+got_path <- here("data","got.pdf")
+got_path
+got_text <- pdf_text(got_path)
+```
+I wrangle my data. I.e. i separate the pages into lines
+
+```{r}
+got_df <- data.frame(got_text) %>% 
+  mutate(text_full = str_split(got_text, pattern = '\n')) %>% 
+  unnest(text_full) %>% 
+  mutate(text_full = str_trim(text_full))
+```
+
+Now i tokenize so that my words are split into single cells, so that i can make my analysis. 
+
+```{r}
+got_tokens <- got_df %>% 
+  unnest_tokens(word, text_full)
+got_tokens
+```
+I count the words, and range them from most to least occuring:
+```{r}
+got_wc <- got_tokens %>% 
+  count(word) %>% 
+  arrange(-n)
+got_wc
+```
+I sort out the stopwords: 
+```{r}
+got_stop <- got_tokens %>% 
+  anti_join(stop_words) %>% 
+  select(-got_text)
+got_stop
+```
+```{r}
+got_swc <- got_stop %>% 
+  count(word) %>% 
+  arrange(-n)
+got_swc
+```
+We filter out numeric words(it appears that there are few to none, but just in case)
+
+```{r}
+got_no_numeric <- got_stop %>% 
+  filter(is.na(as.numeric(word)))
+```
+
+We can see in our environment that the got_no_numeric has 106 less values, so there were in fact a few. 
+
+Now i check the amount of different unique words in the book:
+
+```{r}
+length(unique(got_no_numeric$word))
+```
+
+It seems that George R.R. Martins vocabulary is rather vast. 
+
+Now i'll check the 200 most common words in the book(of course excluding the stopwords):
+
+```{r}
+got_top200 <- got_no_numeric %>% 
+  count(word) %>% 
+  arrange(-n) %>% 
+  head(200)
+got_top200
+```
+Seems that we are dealing with a fantasy novel! Who could have known?
+
+Now i'll make a word cloud:
+
+```{r}
+got_cloud <- ggplot(data = got_top200, aes(label = word)) +
+  geom_text_wordcloud() +
+  theme_minimal()
+got_cloud
+```
+And i'll costumize it a bit: 
+
+```{r}
+ggplot(data = got_top200, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(aes(color = n), shape = "star") +
+  scale_size_area(max_size = 12) +
+  scale_color_gradientn(colors = c("blue","purple","violet")) +
+  theme_minimal()
+```
+Now i load my different sentiment lexica, so that i can do my sentiment analysis
+```{r afinn}
+get_sentiments(lexicon = "afinn")
+get_sentiments(lexicon = "bing")
+get_sentiments(lexicon = "nrc")
+```
+First of i bind my words to the afinn lexicon: 
+
+```{r}
+got_afinn <- got_stop %>% 
+  inner_join(get_sentiments("afinn"))
+got_afinn
+```
+Now i count and plot the words and their respective values: 
+```{r}
+got_afinn_hist <- got_afinn %>% 
+  count(value)
+
+ggplot(data = got_afinn_hist, aes(x = value, y = n)) +
+  geom_col(aes(fill = value)) +
+  theme_bw()
+```
+It appears that the text is more negatively, than positively loaded. 
+
+I'll just have a look at what the very negatively loaded words are - perhaps The Hound has added to this rhetoric: 
+```{r}
+got_afinn2 <- got_afinn %>% 
+  filter(value == -2)
+got_afinn2
+```
+
+Now i'll investigate the -2-words in a bit more depth as that column stands out: 
+
+First off i define a new data frame of the top 100 -2-value words: 
+
+```{r}
+got_afinn2_top50 <- got_afinn2 %>% 
+  count(word) %>% 
+  arrange(-n) %>% 
+  head(50)
+```
+And now i plot my data:
+```{r}
+ggplot(data = got_afinn2_top50, aes(x = reorder(word, n), y = n)) +
+  geom_col() +
+  coord_flip() +
+  theme_bw()
+```
+
+As we can see, there are no prominent outliers. It could be interesting to examine the contexts of the most used words, but i wont bother reading through the book(again) to check for these. Taking random samples would also be a lot of work as the data frame is quite large.  
+
+Now i'll have a look at the average and see if my initial impression of the text being negatively loaded holds true: 
+
+```{r}
+got_summary <- got_afinn %>% 
+  summarize(
+    mean_score = mean(value),
+    median_score = median(value)
+  )
+got_summary
+```
+So the text appears to be surprisingly close to an average of zero, but I would still argue that the text is generally more negatively than positively loaded. 
+
+Now i will begin using the nrc to analyze the text, by making a new data frame in which i have assigned the nrc-lexicon to the words: 
+
+```{r}
+got_nrc <- got_stop %>% 
+  inner_join(get_sentiments("nrc"))
+```
+Now i'll just check the words that have been excluded by doing this:
+
+```{r}
+got_exclude <- got_stop %>% 
+  anti_join(get_sentiments("nrc"))
+got_exclude
+```
+There are clearly a lot of excluded words, and the analysis will therefore contain a lot of uncertainty(not even taking into account  that all of this is just defined by a culturally and lingustically biased individual). We will though look at the given words and connected sentiments in the lexicon as representative of the larger picture. 
+
+I will now count and plot some words and sentiments: 
+
+```{r}
+got_nrc_n <- got_nrc %>% 
+  count(sentiment, sort = TRUE)
+
+ggplot(data = got_nrc_n, aes(x = sentiment, y = n)) +
+  geom_col(aes(fill = sentiment))+
+  theme_bw()
+```
+
+Now i will have a look at what words are connected to what sentiment:
+
+```{r}
+got_nrc_n5 <- got_nrc %>% 
+  count(word,sentiment, sort = TRUE) %>% 
+  group_by(sentiment) %>% 
+  top_n(5) %>% 
+  ungroup()
+
+got_nrc_gg <- ggplot(data = got_nrc_n5, aes(x = reorder(word,n), y = n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, ncol = 2, scales = "free") +
+  coord_flip() +
+  theme_minimal() +
+  labs(x = "Word", y = "count")
+
+got_nrc_gg
+
+ggsave(plot = got_nrc_gg, 
+       here("figures","got_nrc_sentiment.png"), 
+       height = 8, 
+       width = 5)
+```
+In this context the obvious thing to examine would be what sentiments and word connotations are dominant in the book "A game of thrones", as that is what the analysis shown above directly illuminates. I do however think there is an opportunity here, to question the method itself and add to our insight in how the usage of sentiment analysis based on predefined lexica can assist or interfere with ones work when dealing with large quantities of text. 
+
+For example, the occurrence of the word stark associated with the categories trust as well as negative, is quite a large pitfall as it is a surname, and not referring to the adjective stark. And even if it did, it is paradoxical how one entry of the word "stark" will add to two distinct categories which, though not directly, would usually be contradictory. This facet should also be considered in the general framework of this type of analysis - when we are quantifying qualitative data, we are still making active choices about how to interpret those data. And just to quote Max PLanck: "Wenn Sie die Art und Weise ändern, wie Sie die Dinge betrachten, ändern sich die Dinge, die Sie betrachten."
+
+Another pitfall using the visualization above is that it makes it harder for us to compare the different sentiments, as they have all been fitted to the scale. If we do want to use this analysis to say something perceptive about the sentiment analysis itself, or rather convey that through visualization, it would be much wiser to show the plot shown above, as well as the bar chart which can be found in the html, in which the sentiments are shown relative to one another. 
+
+To sum up; we have to be extremely weary, when making these types of visualisations. There can be great benefits in, using these tools, and in some ways they are way more powerful than one set of reading eyes. On the other hand we must never be fooled by fancy graphics - we always have to be aware that this way of dealing with data is in it's own way very subjective and interpretational. 
+
+
